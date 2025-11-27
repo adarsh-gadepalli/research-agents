@@ -7,6 +7,9 @@ import asyncio
 import logging
 from datetime import datetime
 import json
+import os
+import ollama
+from duckduckgo_search import DDGS
 
 # Configure logging
 logging.basicConfig(
@@ -14,6 +17,39 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Initialize free research agent (Ollama + DuckDuckGo)
+# Check if Ollama is available
+ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")  # Default to llama3.2, can use llama3.1, mistral, etc.
+ollama_available = False
+try:
+    # Test Ollama connection
+    logger.info(f"🔍 Checking Ollama availability (model: {ollama_model})...")
+    test_response = ollama.list()
+    # Ollama returns a ListResponse object with a models attribute containing Model objects
+    # Each Model object has a 'model' attribute (not 'name') with the model name
+    available_models = [model.model for model in test_response.models]
+    logger.info(f"✅ Ollama is running. Available models: {', '.join(available_models) if available_models else 'None'}")
+    
+    # Check if the specified model is available (handle both "llama3.2" and "llama3.2:latest")
+    matching_models = [model for model in available_models if ollama_model in model or model.startswith(ollama_model + ':')]
+    if not matching_models:
+        logger.warning(f"⚠️ Model '{ollama_model}' not found. Available models: {', '.join(available_models) if available_models else 'None'}")
+        logger.warning(f"⚠️ Please install the model with: ollama pull {ollama_model}")
+        logger.warning(f"⚠️ Or set OLLAMA_MODEL environment variable to an available model")
+        logger.warning(f"⚠️ Research will work with DuckDuckGo search only (no AI analysis)")
+    else:
+        # Use the first matching model (prefer exact match, then any match)
+        ollama_model = matching_models[0]  # Use the actual model name from Ollama
+        logger.info(f"✅ Using Ollama model: {ollama_model}")
+        ollama_available = True
+except Exception as e:
+    logger.warning(f"⚠️ Ollama not available: {e}")
+    logger.warning("⚠️ Research will work with DuckDuckGo search only (no AI analysis)")
+    logger.warning("⚠️ To enable AI analysis, install Ollama from https://ollama.ai")
+    logger.warning("⚠️ Then run: ollama pull llama3.2")
+
+logger.info("✅ Free research agent initialized (DuckDuckGo search" + (" + Ollama AI" if ollama_available else "") + ")")
 
 # Print startup message immediately
 print("=" * 60)
@@ -78,15 +114,15 @@ async def root():
 
 @app.get("/health")
 async def health():
-    logger.info("💚 GET /health - Health check requested")
+    logger.info("💚 GET /health - Health check requested") 
     logger.info("✅ Health check passed - Server is healthy")
     return {"status": "healthy"}
 
 
 async def perform_research(question: str) -> ResearchResponse:
     """
-    Perform the actual research work.
-    Returns placeholder results immediately without any delay.
+    Perform research using free tools: Ollama (local LLM) + DuckDuckGo (web search).
+    Completely free - no API costs!
     """
     start_time = datetime.now()
     logger.info("🔍 [RESEARCH] Starting research process...")
@@ -94,55 +130,268 @@ async def perform_research(question: str) -> ResearchResponse:
     logger.info(f"🔍 [RESEARCH] Start time: {start_time.isoformat()}")
     
     # Step 1: Initialization
-    logger.info("📝 [RESEARCH] Step 1/4: Initializing research agent...")
-    logger.info("✅ [RESEARCH] Step 1/4: Research agent initialized")
+    logger.info("📝 [RESEARCH] Step 1/4: Initializing free research agent...")
+    logger.info("✅ [RESEARCH] Step 1/4: Research agent initialized (Ollama + DuckDuckGo)")
     
-    # Step 2: Searching
-    logger.info("🔎 [RESEARCH] Step 2/4: Searching databases and sources...")
-    logger.info("✅ [RESEARCH] Step 2/4: Search completed - Found relevant sources")
+    # Step 2: Searching the web with DuckDuckGo
+    logger.info("🔎 [RESEARCH] Step 2/4: Searching web with DuckDuckGo...")
     
-    # Step 3: Analyzing
-    logger.info("🧠 [RESEARCH] Step 3/4: Analyzing information...")
-    logger.info("✅ [RESEARCH] Step 3/4: Analysis completed")
-    
-    # Step 4: Synthesizing
-    logger.info("📊 [RESEARCH] Step 4/4: Synthesizing findings...")
-    logger.info("✅ [RESEARCH] Step 4/4: Synthesis completed")
-    
-    # Simulate research agent processing
-    # In a real implementation, this would:
-    # 1. Search the web or databases
-    # 2. Analyze information using AI/ML models
-    # 3. Synthesize findings
-    # 4. Return structured results
+    try:
+        search_results = []
+        sources = []
+        
+        try:
+            with DDGS() as ddgs:
+                # Search for relevant information
+                search_results = list(ddgs.text(question, max_results=5))
+                logger.info(f"✅ [RESEARCH] Found {len(search_results)} search results")
+                
+                # Extract sources (ensure we get strings)
+                for result in search_results:
+                    if isinstance(result, dict):
+                        if 'href' in result:
+                            sources.append(str(result['href']))
+                        elif 'url' in result:
+                            sources.append(str(result['url']))
+                    elif isinstance(result, str):
+                        sources.append(result)
+        except Exception as e:
+            logger.warning(f"⚠️ [RESEARCH] DuckDuckGo search error: {e}")
+            logger.warning("⚠️ [RESEARCH] Continuing without web search results")
+        
+        # Step 3: Analyzing with Ollama
+        logger.info("🧠 [RESEARCH] Step 3/4: Analyzing with Ollama LLM...")
+        
+        # Prepare context from search results
+        search_context = ""
+        if search_results:
+            search_context = "\n\nWeb Search Results:\n"
+            for i, result in enumerate(search_results[:3], 1):
+                title = result.get('title', '')
+                body = result.get('body', '')
+                search_context += f"{i}. {title}\n{body}\n\n"
+        
+        # Create research prompt
+        research_prompt = f"""You are an expert research assistant. Conduct thorough research on the following question and provide a comprehensive analysis.
 
-    logger.info("📦 [RESEARCH] Preparing research results...")
-    
-    # Mock research results - returned immediately
-    research_results = ResearchResponse(
-        question=question,
-        summary=f'Based on research about "{question}", here are the key findings...',
-        findings=[
-            f'Finding 1: This is a simulated research result related to "{question}".',
-            f'Finding 2: Additional information and insights about the topic.',
-            f'Finding 3: Further analysis and conclusions.',
-        ],
-        sources=[
-            'Source 1: Research Database',
-            'Source 2: Academic Papers',
-            'Source 3: Expert Analysis',
-        ],
-        timestamp=datetime.now().isoformat(),
-    )
-    
-    end_time = datetime.now()
-    duration = (end_time - start_time).total_seconds()
-    logger.info(f"⏱️ [RESEARCH] Research completed in {duration:.4f} seconds (instant)")
-    logger.info(f"📊 [RESEARCH] Generated {len(research_results.findings)} findings")
-    logger.info(f"📚 [RESEARCH] Found {len(research_results.sources)} sources")
-    logger.info("✅ [RESEARCH] Research process completed successfully")
+Research Question: {question}
+{search_context}
 
-    return research_results
+Please provide:
+1. A concise summary (2-3 sentences) of the key findings
+2. At least 3-5 specific findings, each as a clear, informative statement
+3. List any relevant sources or references
+
+Format your response as JSON with the following structure:
+{{
+    "summary": "A concise summary of the research findings",
+    "findings": ["Finding 1", "Finding 2", "Finding 3", ...],
+    "sources": ["Source 1", "Source 2", ...]
+}}
+
+Be thorough, accurate, and provide valuable insights about the topic."""
+
+        # Step 3: Analyzing with Ollama (if available) or using search results directly
+        if ollama_available:
+            logger.info("🧠 [RESEARCH] Step 3/4: Analyzing with Ollama LLM...")
+            # Call Ollama
+            loop = asyncio.get_event_loop()
+            logger.info(f"🤖 [RESEARCH] Querying Ollama model: {ollama_model}...")
+            
+            def call_ollama():
+                try:
+                    # Try using chat API first (better for structured responses)
+                    response = ollama.chat(
+                        model=ollama_model,
+                        messages=[
+                            {
+                                'role': 'system',
+                                'content': 'You are an expert research assistant. Provide well-structured, accurate research findings in JSON format when possible.'
+                            },
+                            {
+                                'role': 'user',
+                                'content': research_prompt
+                            }
+                        ]
+                    )
+                    return response.get('message', {}).get('content', '')
+                except Exception as e:
+                    logger.warning(f"⚠️ Chat API failed, trying generate: {e}")
+                    # Fallback to generate API
+                    response = ollama.generate(model=ollama_model, prompt=research_prompt)
+                    return response.get('response', '')
+            
+            ai_response_text = await loop.run_in_executor(None, call_ollama)
+            logger.info(f"✅ [RESEARCH] Step 3/4: Analysis completed ({len(ai_response_text)} characters)")
+        else:
+            # Fallback: Use search results directly without AI analysis
+            logger.info("🧠 [RESEARCH] Step 3/4: Synthesizing search results (Ollama not available)...")
+            logger.info("⚠️ [RESEARCH] Using search results directly - install Ollama for AI-powered analysis")
+            
+            # Create a summary from search results
+            if search_results:
+                ai_response_text = f"""Summary: Based on web search results, here are key findings about "{question}".
+
+Findings:
+"""
+                for i, result in enumerate(search_results[:5], 1):
+                    title = result.get('title', '')
+                    body = result.get('body', '')
+                    ai_response_text += f"- {title}: {body[:200]}\n"
+                
+                ai_response_text += "\nSources:\n"
+                for source in sources[:5]:
+                    ai_response_text += f"- {source}\n"
+            else:
+                ai_response_text = f'Research completed for "{question}". No specific search results found, but the question has been processed.'
+            
+            logger.info(f"✅ [RESEARCH] Step 3/4: Synthesis completed ({len(ai_response_text)} characters)")
+        
+        # Step 4: Parsing and synthesizing results
+        logger.info("📊 [RESEARCH] Step 4/4: Parsing and synthesizing findings...")
+        
+        # Try to parse JSON from response
+        summary = ""
+        findings = []
+        parsed_sources = []
+        
+        try:
+            # Try to extract JSON from the response
+            json_start = ai_response_text.find('{')
+            json_end = ai_response_text.rfind('}') + 1
+            
+            if json_start >= 0 and json_end > json_start:
+                json_str = ai_response_text[json_start:json_end]
+                ai_data = json.loads(json_str)
+                summary = ai_data.get("summary", "")
+                raw_findings = ai_data.get("findings", [])
+                parsed_sources = ai_data.get("sources", [])
+                
+                # Normalize findings - convert dicts to strings
+                def normalize_finding(finding):
+                    """Convert any finding type to a string."""
+                    if isinstance(finding, str):
+                        return finding
+                    elif isinstance(finding, dict):
+                        # If it's a dict, try to extract title and description
+                        title = finding.get('title', '')
+                        description = finding.get('description', finding.get('body', finding.get('text', '')))
+                        if title and description:
+                            return f"{title}: {description}"
+                        elif title:
+                            return title
+                        elif description:
+                            return description
+                        else:
+                            return str(finding)
+                    elif isinstance(finding, list):
+                        return ', '.join(str(f) for f in finding)
+                    else:
+                        return str(finding)
+                
+                findings = [normalize_finding(f) for f in raw_findings]
+            else:
+                # If no JSON found, parse the text directly
+                lines = ai_response_text.split('\n')
+                summary_lines = []
+                finding_lines = []
+                
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    if 'summary' in line.lower() or 'finding' in line.lower() or 'key point' in line.lower():
+                        if line.startswith('-') or line.startswith('•') or line.startswith('*'):
+                            finding_lines.append(line.lstrip('- •*').strip())
+                        else:
+                            summary_lines.append(line)
+                    elif line.startswith('-') or line.startswith('•') or line.startswith('*'):
+                        finding_lines.append(line.lstrip('- •*').strip())
+                    elif 'http' in line.lower():
+                        parsed_sources.append(line)
+                
+                summary = ' '.join(summary_lines[:3]) if summary_lines else ai_response_text[:300]
+                findings = finding_lines[:10] if finding_lines else [ai_response_text[i:i+150] for i in range(0, min(len(ai_response_text), 500), 150)][:5]
+        except json.JSONDecodeError:
+            # Fallback: parse as plain text
+            logger.warning("⚠️ [RESEARCH] Could not parse JSON, using text parsing")
+            summary = ai_response_text[:300] + "..." if len(ai_response_text) > 300 else ai_response_text
+            sentences = ai_response_text.split('. ')
+            findings = [s.strip() + '.' for s in sentences[:5] if len(s.strip()) > 20]
+        
+        # Combine sources from search and AI
+        # Ensure all sources are strings (handle dicts, lists, etc.)
+        def normalize_source(source):
+            """Convert any source type to a string."""
+            if isinstance(source, str):
+                return source
+            elif isinstance(source, dict):
+                # If it's a dict, try to extract URL or convert to string
+                return source.get('url', source.get('href', str(source)))
+            elif isinstance(source, list):
+                return ', '.join(str(s) for s in source)
+            else:
+                return str(source)
+        
+        # Normalize all sources to strings
+        normalized_sources = [normalize_source(s) for s in sources]
+        normalized_parsed_sources = [normalize_source(s) for s in parsed_sources]
+        
+        # Combine and deduplicate
+        all_sources = list(set(normalized_sources + normalized_parsed_sources))[:10]
+        if not all_sources:
+            all_sources = ["DuckDuckGo Search", "Ollama Analysis"]
+        
+        # Ensure all findings are strings (final validation)
+        findings = [str(f) for f in findings if f]  # Convert to strings and filter out empty values
+        
+        # Ensure we have findings
+        if not findings:
+            findings = [f"Research analysis completed for: {question}"]
+        
+        # Ensure summary exists
+        if not summary:
+            summary = f'Research findings about "{question}"'
+        
+        # Ensure summary is a string
+        summary = str(summary) if summary else f'Research findings about "{question}"'
+        
+        research_results = ResearchResponse(
+            question=question,
+            summary=summary,
+            findings=findings[:10],
+            sources=all_sources[:10],
+            timestamp=datetime.now().isoformat(),
+        )
+        
+        logger.info("✅ [RESEARCH] Step 4/4: Synthesis completed")
+        
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        logger.info(f"⏱️ [RESEARCH] Research completed in {duration:.2f} seconds")
+        logger.info(f"📊 [RESEARCH] Generated {len(research_results.findings)} findings")
+        logger.info(f"📚 [RESEARCH] Found {len(research_results.sources)} sources")
+        logger.info("✅ [RESEARCH] Research process completed successfully")
+        
+        return research_results
+        
+    except Exception as e:
+        logger.error(f"❌ [RESEARCH] Error during research: {type(e).__name__}: {str(e)}")
+        logger.exception("Full error traceback:")
+        # Return a fallback response instead of raising
+        logger.warning("⚠️ [RESEARCH] Returning fallback response due to error")
+        return ResearchResponse(
+            question=question,
+            summary=f'An error occurred while researching "{question}". Please ensure Ollama is installed and running.',
+            findings=[
+                f"Error: {str(e)}",
+                "Please ensure Ollama is installed: https://ollama.ai",
+                f"Install a model with: ollama pull {ollama_model}",
+                "Check that Ollama is running and accessible."
+            ],
+            sources=["Error occurred during research"],
+            timestamp=datetime.now().isoformat(),
+        )
 
 
 @app.options("/api/research")
@@ -155,8 +404,8 @@ async def research_options():
 @app.post("/api/research", response_model=ResearchResponse)
 async def research(request: ResearchRequest):
     """
-    Research agent endpoint that processes research questions.
-    Has a maximum timeout of 5 seconds.
+    Research agent endpoint that processes research questions using OpenDeepResearch.
+    Has a configurable timeout (default: 60 seconds for deep research).
     """
     request_start_time = datetime.now()
     
@@ -177,16 +426,19 @@ async def research(request: ResearchRequest):
         raise ValueError("Question is required")
     
     logger.info("✅ [VALIDATION] Request validation passed")
-    logger.info(f"⏱️ [TIMEOUT] Setting 5-second timeout for research process")
+    
+    # Get timeout from environment or use default (60 seconds for deep research)
+    timeout_seconds = float(os.getenv("RESEARCH_TIMEOUT", "60.0"))
+    logger.info(f"⏱️ [TIMEOUT] Setting {timeout_seconds}-second timeout for research process")
 
     try:
         logger.info("🚀 [EXECUTION] Starting research execution with timeout wrapper...")
         execution_start = datetime.now()
         
-        # Execute research with a 5-second timeout
+        # Execute research with configurable timeout
         research_results = await asyncio.wait_for(
             perform_research(request.question),
-            timeout=5.0
+            timeout=timeout_seconds
         )
         
         execution_end = datetime.now()
@@ -233,13 +485,13 @@ async def research(request: ResearchRequest):
         logger.error(f"🕐 Timeout occurred at: {timeout_time.isoformat()}")
         logger.error(f"⏱️ Time elapsed before timeout: {total_duration:.2f} seconds")
         logger.error(f"❓ Question that timed out: {request.question}")
-        logger.error("⚠️ Research took longer than 5 seconds and was terminated")
+        logger.error(f"⚠️ Research took longer than {timeout_seconds} seconds and was terminated")
         logger.error("=" * 60)
         
         # Return a timeout response instead of raising an error
         timeout_response = ResearchResponse(
             question=request.question,
-            summary=f'Research timeout: The research for "{request.question}" exceeded the 5-second time limit.',
+            summary=f'Research timeout: The research for "{request.question}" exceeded the {timeout_seconds}-second time limit.',
             findings=[
                 'The research process was interrupted due to timeout.',
                 'Please try again with a more specific question.',
